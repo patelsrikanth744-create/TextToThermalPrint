@@ -2,6 +2,7 @@ package com.tasteoftown.texttoprint
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
@@ -28,93 +29,162 @@ class MainActivity : Activity() {
     private val sppUuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
     private val requestBluetooth = 501
     private val prefs by lazy { getSharedPreferences("print_settings", MODE_PRIVATE) }
-    private lateinit var header: EditText
     private lateinit var body: EditText
-    private lateinit var footer: EditText
-    private lateinit var deviceSpinner: Spinner
     private lateinit var status: TextView
-    private lateinit var paperSpinner: Spinner
     private var devices: List<BluetoothDevice> = emptyList()
+    private var settingsPrinterSpinner: Spinner? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildScreen()
-        loadPairedDevices()
+        loadPairedDevices(null)
     }
 
     private fun buildScreen() {
         val scroll = ScrollView(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(24))
+            setPadding(dp(20), dp(18), dp(20), dp(24))
         }
         scroll.addView(root)
         setContentView(scroll)
 
         root.addView(TextView(this).apply {
             text = "TEXT TO THERMAL PRINT"
-            textSize = 22f; gravity = Gravity.CENTER
-            setPadding(0, dp(8), 0, dp(16)); contentDescription = text
+            textSize = 22f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(8))
+            contentDescription = text
             if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
         })
         root.addView(TextView(this).apply {
-            text = "Hindi + English | Offline Bluetooth Printing"
-            textSize = 14f; gravity = Gravity.CENTER
+            text = "Designed and developed by Shrikant Patel"
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(22))
+            contentDescription = text
         })
 
-        addLabel(root, "Bluetooth printer")
-        deviceSpinner = Spinner(this).apply {
-            contentDescription = "Bluetooth printer selection. Select a paired printer."
+        addLabel(root, "Enter text to print")
+        body = EditText(this).apply {
+            hint = "Type or paste your text here..."
+            minLines = 12
+            gravity = Gravity.TOP or Gravity.START
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            textSize = 18f
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            contentDescription = "Text to print. Enter Hindi or English text."
         }
-        root.addView(deviceSpinner, matchWidth())
-        addButton(root, "Refresh paired printers") { loadPairedDevices() }
-        addButton(root, "Open Bluetooth settings") {
-            try { startActivity(android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)) }
-            catch (_: Exception) { status.text = "Could not open Bluetooth settings." }
-        }
+        root.addView(body, matchWidth())
+        addButton(root, "PRINT") { saveAndPrint() }
+        addButton(root, "Settings") { showSettings() }
 
-        addLabel(root, "Paper width")
-        paperSpinner = Spinner(this).apply {
-            contentDescription = "Paper width selection"
-        }
-        paperSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-            listOf("58mm / 2-inch (384 dots)", "80mm (576 dots)"))
-        root.addView(paperSpinner, matchWidth())
-
-        addLabel(root, "Header (optional)")
-        header = edit(root, "उदाहरण: TASTE OF TOWN\nदमोह", 3)
-        addLabel(root, "Your text / अपना टेक्स्ट")
-        body = edit(root, "यहाँ हिंदी या English में लिखें...", 9)
-        addLabel(root, "Footer (optional)")
-        footer = edit(root, "उदाहरण: धन्यवाद! / THANK YOU!", 3)
-
-        addButton(root, "PRINT DIRECTLY / सीधे प्रिंट करें") { saveAndPrint() }
-        addButton(root, "Save header and footer") {
-            prefs.edit().putString("header", header.text.toString())
-                .putString("footer", footer.text.toString()).apply()
-            status.text = "Header and footer saved on this phone."
-        }
         status = TextView(this).apply {
-            textSize = 15f; setPadding(0, dp(16), 0, 0)
+            text = "Ready. Enter text, then tap Print."
+            textSize = 15f
+            setPadding(0, dp(18), 0, 0)
             contentDescription = "Printer status"
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
         root.addView(status)
+        body.textSize = prefs.getInt("font_size", 24).toFloat()
+    }
+
+    private fun showSettings() {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }
+        val scroll = ScrollView(this).apply { addView(panel) }
+
+        addLabel(panel, "Header (optional)")
+        val header = edit(panel, "Enter receipt header", 2)
         header.setText(prefs.getString("header", ""))
+        addLabel(panel, "Footer (optional)")
+        val footer = edit(panel, "Enter receipt footer", 2)
         footer.setText(prefs.getString("footer", ""))
+
+        addLabel(panel, "Print font size")
+        val sizes = listOf("18", "20", "22", "24", "26", "28", "30", "32", "36")
+        val font = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, sizes)
+            setSelection(sizes.indexOf(prefs.getInt("font_size", 24).toString()).coerceAtLeast(0))
+            contentDescription = "Print font size"
+        }
+        panel.addView(font, matchWidth())
+
+        addLabel(panel, "Bluetooth printer")
+        val printer = Spinner(this).apply {
+            contentDescription = "Select paired Bluetooth thermal printer"
+        }
+        settingsPrinterSpinner = printer
+        panel.addView(printer, matchWidth())
+        loadPairedDevices(printer)
+        addButton(panel, "Refresh paired printers") { loadPairedDevices(printer) }
+        addButton(panel, "Open Bluetooth settings") {
+            try {
+                startActivity(android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS))
+            } catch (_: Exception) {
+                status.text = "Could not open Bluetooth settings."
+            }
+        }
+
+        addLabel(panel, "Paper width")
+        val paper = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("58mm / 2-inch", "80mm"))
+            setSelection(prefs.getInt("paper_width_index", 0).coerceIn(0, 1))
+            contentDescription = "Paper width"
+        }
+        panel.addView(paper, matchWidth())
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Settings")
+            .setView(scroll)
+            .setPositiveButton("Save settings", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selected = printer.selectedItemPosition
+                if (devices.isEmpty() || selected !in devices.indices) {
+                    status.text = "Pair and select a Bluetooth printer in Settings."
+                    return@setOnClickListener
+                }
+                val fontSize = sizes[font.selectedItemPosition].toInt()
+                prefs.edit()
+                    .putString("header", header.text.toString())
+                    .putString("footer", footer.text.toString())
+                    .putInt("font_size", fontSize)
+                    .putString("printer_address", devices[selected].address)
+                    .putInt("paper_width_index", paper.selectedItemPosition)
+                    .apply()
+                body.textSize = fontSize.toFloat()
+                status.text = "Settings saved."
+                dialog.dismiss()
+            }
+        }
+        dialog.setOnDismissListener { settingsPrinterSpinner = null }
+        dialog.show()
     }
 
     private fun addLabel(parent: LinearLayout, value: String) {
         parent.addView(TextView(this).apply {
-            text = value; textSize = 16f; setPadding(0, dp(14), 0, dp(6))
+            text = value
+            textSize = 16f
+            setPadding(0, dp(14), 0, dp(6))
         })
     }
 
     private fun edit(parent: LinearLayout, hintText: String, lines: Int): EditText {
         val field = EditText(this).apply {
-            hint = hintText; minLines = lines; gravity = Gravity.TOP or Gravity.START
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-            textSize = 16f; setPadding(dp(10), dp(10), dp(10), dp(10))
+            hint = hintText
+            minLines = lines
+            gravity = Gravity.TOP or Gravity.START
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            textSize = 16f
+            setPadding(dp(10), dp(10), dp(10), dp(10))
             contentDescription = hintText
         }
         parent.addView(field, matchWidth())
@@ -122,11 +192,16 @@ class MainActivity : Activity() {
     }
 
     private fun addButton(parent: LinearLayout, label: String, action: () -> Unit) {
-        val button = Button(this).apply { text = label; textSize = 16f; setOnClickListener { action() } }
-        parent.addView(button, matchWidth().apply { topMargin = dp(10) })
+        parent.addView(Button(this).apply {
+            text = label
+            textSize = 16f
+            setOnClickListener { action() }
+        }, matchWidth().apply { topMargin = dp(10) })
     }
 
-    private fun matchWidth() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    private fun matchWidth() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+    )
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun hasBluetoothPermission(): Boolean {
@@ -134,109 +209,134 @@ class MainActivity : Activity() {
         return checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun loadPairedDevices() {
+    private fun loadPairedDevices(target: Spinner? = settingsPrinterSpinner) {
         if (!hasBluetoothPermission()) {
             requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), requestBluetooth)
             return
         }
         try {
             val adapter = BluetoothAdapter.getDefaultAdapter()
-            if (adapter == null) { status.text = "This phone does not support Bluetooth."; return }
-            if (!adapter.isEnabled) { status.text = "Turn on Bluetooth, then refresh paired printers."; return }
+            if (adapter == null) {
+                status.text = "This phone does not support Bluetooth."
+                return
+            }
+            if (!adapter.isEnabled) {
+                status.text = "Turn on Bluetooth, then refresh paired printers."
+                return
+            }
             devices = adapter.bondedDevices.sortedBy { it.name ?: it.address }
-            val labels = if (devices.isEmpty()) listOf("No paired printers. Pair in Android Bluetooth settings first.")
+            val labels = if (devices.isEmpty()) listOf("No paired printers. Pair one in Bluetooth settings.")
                 else devices.map { "${it.name ?: "Bluetooth printer"} (${it.address})" }
-            deviceSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
-            status.text = if (devices.isEmpty()) "No paired Bluetooth devices found." else "${devices.size} paired device(s) found."
-        } catch (_: SecurityException) { status.text = "Bluetooth permission is required." }
+            target?.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, labels)
+            val saved = prefs.getString("printer_address", "")
+            val savedIndex = devices.indexOfFirst { it.address == saved }
+            if (target != null && savedIndex >= 0) target.setSelection(savedIndex)
+            status.text = if (devices.isEmpty()) "No paired Bluetooth printers found."
+                else "${devices.size} paired printer(s) found."
+        } catch (_: SecurityException) {
+            status.text = "Bluetooth permission is required."
+        }
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == requestBluetooth && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) loadPairedDevices()
-        else status.text = "Bluetooth permission denied."
+        if (requestCode == requestBluetooth && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            loadPairedDevices(settingsPrinterSpinner)
+        } else {
+            status.text = "Bluetooth permission denied."
+        }
     }
 
     private fun saveAndPrint() {
-        if (!hasBluetoothPermission()) { loadPairedDevices(); return }
-        if (devices.isEmpty() || deviceSpinner.selectedItemPosition !in devices.indices) {
-            status.text = "Pair your printer in Android Settings, then tap Refresh paired printers."; return
+        if (!hasBluetoothPermission()) {
+            loadPairedDevices(settingsPrinterSpinner)
+            return
         }
-        if (header.text.isBlank() && body.text.isBlank() && footer.text.isBlank()) {
-            status.text = "Please enter some text before printing."; return
+        if (body.text.isBlank()) {
+            status.text = "Please enter text before printing."
+            body.requestFocus()
+            return
         }
-        prefs.edit().putString("header", header.text.toString()).putString("footer", footer.text.toString()).apply()
-        val width = if (paperSpinner.selectedItemPosition == 1) 576 else 384
-        val selectedDevice = devices[deviceSpinner.selectedItemPosition]
-        val headerText = header.text.toString()
-        val bodyText = body.text.toString()
-        val footerText = footer.text.toString()
+        val address = prefs.getString("printer_address", "")
+        val device = devices.firstOrNull { it.address == address }
+        if (device == null) {
+            status.text = "Open Settings and select a paired Bluetooth printer first."
+            return
+        }
+
+        val width = if (prefs.getInt("paper_width_index", 0) == 1) 576 else 384
+        val head = prefs.getString("header", "") ?: ""
+        val main = body.text.toString()
+        val foot = prefs.getString("footer", "") ?: ""
+        val fontSize = prefs.getInt("font_size", 24)
         status.text = "Connecting and preparing print..."
 
         Thread {
             var socket: BluetoothSocket? = null
             try {
-                val bitmap = createReceiptBitmap(width, headerText, bodyText, footerText)
-                val raster = bitmapToEscPos(bitmap)
-                val adapter = BluetoothAdapter.getDefaultAdapter()
-                try { adapter?.cancelDiscovery() } catch (_: Exception) {}
-                socket = selectedDevice.createRfcommSocketToServiceRecord(sppUuid)
+                val raster = bitmapToEscPos(createReceiptBitmap(width, head, main, foot, fontSize))
+                try { BluetoothAdapter.getDefaultAdapter()?.cancelDiscovery() } catch (_: Exception) {}
+                socket = device.createRfcommSocketToServiceRecord(sppUuid)
                 socket.connect()
                 val out: OutputStream = socket.outputStream
-                out.write(byteArrayOf(0x1B, 0x40)) // initialize
+                out.write(byteArrayOf(0x1B, 0x40))
                 out.write(raster)
                 out.write(byteArrayOf(0x0A, 0x0A, 0x0A))
-                out.write(byteArrayOf(0x1D, 0x56, 0x00)) // cut command; ignored by printers without cutter
+                out.write(byteArrayOf(0x1D, 0x56, 0x00))
                 out.flush()
                 runOnUiThread { status.text = "Print data sent. Check the printer output." }
             } catch (e: Exception) {
-                runOnUiThread { status.text = "Print failed: ${e.message ?: "Check pairing, printer power and compatibility."}" }
-            } finally { try { socket?.close() } catch (_: Exception) {} }
+                runOnUiThread { status.text = "Print failed: ${e.message ?: "Check printer power and pairing."}" }
+            } finally {
+                try { socket?.close() } catch (_: Exception) {}
+            }
         }.start()
     }
 
-    // Android's system font shaping renders Devanagari and Latin together into a bitmap.
-    private fun createReceiptBitmap(width: Int, head: String, main: String, foot: String): Bitmap {
+    private fun createReceiptBitmap(width: Int, head: String, main: String, foot: String, fontSize: Int): Bitmap {
         val pad = 12
         val contentWidth = width - pad * 2
         val sections = mutableListOf<Pair<StaticLayout, Int>>()
 
-        fun layout(text: String, size: Float, alignment: Layout.Alignment, bold: Boolean, gap: Int) {
+        fun addSection(text: String, size: Float, alignment: Layout.Alignment, bold: Boolean, gap: Int) {
             if (text.isBlank()) return
             val paint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
                 color = Color.BLACK
                 textSize = size
-                typeface = if (bold) android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.BOLD)
-                           else android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
+                typeface = android.graphics.Typeface.create(
+                    "sans-serif", if (bold) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL
+                )
             }
-            val sl = StaticLayout.Builder.obtain(text, 0, text.length, paint, contentWidth)
+            val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, contentWidth)
                 .setAlignment(alignment)
                 .setIncludePad(true)
                 .setLineSpacing(2f, 1.0f)
-                .setBreakStrategy(android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY)
+                .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
                 .build()
-            sections.add(sl to gap)
+            sections.add(layout to gap)
         }
 
-        layout(head, 27f, Layout.Alignment.ALIGN_CENTER, true, 14)
-        layout(main, 24f, Layout.Alignment.ALIGN_NORMAL, false, 14)
-        layout(foot, 22f, Layout.Alignment.ALIGN_CENTER, true, 10)
-        val totalHeight = (sections.sumOf { it.first.height + it.second } + 24).coerceAtLeast(80)
-        val bitmap = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
+        addSection(head, (fontSize + 4).toFloat(), Layout.Alignment.ALIGN_CENTER, true, 14)
+        addSection(main, fontSize.toFloat(), Layout.Alignment.ALIGN_NORMAL, false, 14)
+        addSection(foot, (fontSize - 2).coerceAtLeast(14).toFloat(), Layout.Alignment.ALIGN_CENTER, true, 10)
+
+        val height = (sections.sumOf { it.first.height + it.second } + 24).coerceAtLeast(80)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
         var y = 12f
-        sections.forEach { (sl, gap) ->
+        sections.forEach { (layout, _) ->
             canvas.save()
             canvas.translate(pad.toFloat(), y)
-            sl.draw(canvas)
+            layout.draw(canvas)
             canvas.restore()
-            y += sl.height + gap
+            y += layout.height + 14
         }
         return bitmap
     }
 
-    // ESC/POS GS v 0 raster bit image command. This avoids printer code-page limitations for Hindi.
     private fun bitmapToEscPos(bitmap: Bitmap): ByteArray {
         val widthBytes = ceil(bitmap.width / 8.0).toInt()
         val height = bitmap.height
@@ -244,9 +344,11 @@ class MainActivity : Activity() {
         var top = 0
         while (top < height) {
             val rows = minOf(256, height - top)
-            result.write(byteArrayOf(0x1D, 0x76, 0x30, 0x00,
+            result.write(byteArrayOf(
+                0x1D, 0x76, 0x30, 0x00,
                 (widthBytes and 0xFF).toByte(), ((widthBytes shr 8) and 0xFF).toByte(),
-                (rows and 0xFF).toByte(), ((rows shr 8) and 0xFF).toByte()))
+                (rows and 0xFF).toByte(), ((rows shr 8) and 0xFF).toByte()
+            ))
             for (y in top until top + rows) {
                 for (xb in 0 until widthBytes) {
                     var value = 0
@@ -254,7 +356,8 @@ class MainActivity : Activity() {
                         val x = xb * 8 + bit
                         if (x < bitmap.width) {
                             val pixel = bitmap.getPixel(x, y)
-                            val luminance = (Color.red(pixel) * 299 + Color.green(pixel) * 587 + Color.blue(pixel) * 114) / 1000
+                            val luminance = (Color.red(pixel) * 299 + Color.green(pixel) * 587 +
+                                Color.blue(pixel) * 114) / 1000
                             if (luminance < 160) value = value or (0x80 shr bit)
                         }
                     }
