@@ -3,6 +3,7 @@ package com.tasteoftown.texttoprint
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipboardManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
@@ -77,6 +78,60 @@ class MainActivity : Activity() {
             contentDescription = "Text to print. Enter Hindi or English text."
         }
         root.addView(body, matchWidth())
+
+        // Quick text actions: clear the editor or paste from the system clipboard.
+        val textActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        textActions.addView(Button(this).apply {
+            text = "CLEAR ALL"
+            textSize = 15f
+            minHeight = dp(48)
+            contentDescription = "Clear all text from the text box"
+            setOnClickListener {
+                body.text.clear()
+                body.setSelection(0)
+                body.requestFocus()
+                status.text = "All text cleared."
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginEnd = dp(6)
+            topMargin = dp(10)
+        })
+        textActions.addView(Button(this).apply {
+            text = "PASTE"
+            textSize = 15f
+            minHeight = dp(48)
+            contentDescription = "Paste text from clipboard into the text box"
+            setOnClickListener {
+                try {
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = clipboard.primaryClip
+                    val pastedText = clip?.takeIf { it.itemCount > 0 }
+                        ?.getItemAt(0)?.coerceToText(this@MainActivity)?.toString().orEmpty()
+                    if (pastedText.isEmpty()) {
+                        status.text = "Clipboard is empty or does not contain text."
+                    } else {
+                        val editable = body.text
+                        val selectionStart = body.selectionStart
+                        val selectionEnd = body.selectionEnd
+                        val start = if (selectionStart < 0) editable.length else minOf(selectionStart, selectionEnd)
+                        val end = if (selectionStart < 0) editable.length else maxOf(selectionStart, selectionEnd)
+                        editable.replace(start, end, pastedText)
+                        body.setSelection((start + pastedText.length).coerceAtMost(body.length()))
+                        body.requestFocus()
+                        status.text = "Text pasted from clipboard."
+                    }
+                } catch (e: Exception) {
+                    status.text = "Could not paste text from clipboard."
+                }
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginStart = dp(6)
+            topMargin = dp(10)
+        })
+        root.addView(textActions, matchWidth())
         addButton(root, "PRINT") { saveAndPrint() }
         addButton(root, "Settings") { showSettings() }
 
